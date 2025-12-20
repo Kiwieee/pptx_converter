@@ -10,13 +10,15 @@ def get_language_code_for_tts(lang_code: str) -> str:
     """
     Converts translation language code to gTTS language code.
 
+    CRITICAL FIX: Properly handles Chinese variants
+
     Args:
-        lang_code: Translation language code (e.g., 'en', 'tr', 'de')
+        lang_code: Translation language code (e.g., 'en', 'tr', 'zh-CN')
 
     Returns:
         gTTS language code
     """
-    # gTTS language codes mapping
+    # Direct mapping for exact matches (including Chinese variants)
     lang_map = {
         'en': 'en',
         'tr': 'tr',
@@ -25,37 +27,57 @@ def get_language_code_for_tts(lang_code: str) -> str:
         'es': 'es',
         'it': 'it',
         'ru': 'ru',
-        'ja': 'jp',
+        'ja': 'ja',  # FIXED: was 'jp'
         'ko': 'ko',
-        'zh': 'zh-cn'
+        'zh': 'zh-CN',  # Default Chinese
+        'zh-CN': 'zh-CN',  # Simplified Chinese
+        'zh-TW': 'zh-TW',  # Traditional Chinese
+        'pt': 'pt',  # Portuguese
+        'nl': 'nl',  # Dutch
+        'pl': 'pl',  # Polish
+        'ar': 'ar',  # Arabic
+        'hi': 'hi',  # Hindi
     }
-    return lang_map.get(lang_code, 'en')  # Default English
+
+    result = lang_map.get(lang_code.lower(), 'en')
+    print(f"🗣️  TTS Language mapping: {lang_code} → {result}")
+    return result
 
 
 def generate_audio_for_text(text: str, lang_code: str, output_path: str) -> float:
     """
     Converts the given text to an audio file using TTS.
 
+    IMPROVED: Better error handling and duration calculation
+
     Args:
-        text: Text to convert
-        lang_code: Language code (e.g., 'en', 'tr')
+        text: Text to convert (SHOULD BE TRANSLATED AI NARRATION)
+        lang_code: Language code (e.g., 'en', 'tr', 'zh-CN')
         output_path: Output file path (.mp3)
 
     Returns:
         Duration of the audio file (in seconds)
     """
     if not text or not text.strip():
-        # Create empty audio file for empty text
+        # Create minimal silent audio for empty text
         with open(output_path, 'wb') as f:
             f.write(b'')
-        return 0.0
+        return 2.0  # Minimum 2 seconds for empty slides
 
     try:
         tts_lang = get_language_code_for_tts(lang_code)
-        tts = gTTS(text=text, lang=tts_lang, slow=False)
+
+        # Create TTS object with error checking
+        try:
+            tts = gTTS(text=text, lang=tts_lang, slow=False, lang_check=True)
+        except ValueError as ve:
+            print(f"⚠️  Language '{tts_lang}' not supported by gTTS: {ve}")
+            print(f"   Falling back to English...")
+            tts = gTTS(text=text, lang='en', slow=False)
+
         tts.save(output_path)
 
-        # Read actual duration of audio file (using MoviePy)
+        # Get actual duration
         try:
             from moviepy.editor import AudioFileClip
             audio = AudioFileClip(output_path)
@@ -63,22 +85,36 @@ def generate_audio_for_text(text: str, lang_code: str, output_path: str) -> floa
             audio.close()
             return actual_duration
         except Exception as e:
-            print(f"Audio duration could not be read, using estimate: {str(e)}")
-            # Fallback: Average speech rate: ~150 words/min = ~2.5 words/sec
+            print(f"⚠️  Could not read audio duration: {str(e)}")
+            # Improved fallback calculation
+            # Average: ~140 words/min for most languages, ~2.3 words/sec
             word_count = len(text.split())
-            estimated_duration = word_count / 2.5
-            return estimated_duration
+
+            # Adjust for language (some languages speak slower)
+            lang_speed_multiplier = {
+                'ja': 1.3,  # Japanese slower
+                'ko': 1.3,  # Korean slower
+                'zh-CN': 1.2,  # Chinese slower
+                'zh-TW': 1.2,
+                'ru': 1.1,  # Russian slightly slower
+            }.get(tts_lang, 1.0)
+
+            estimated_duration = (word_count / 2.3) * lang_speed_multiplier
+            return max(estimated_duration, 2.0)  # At least 2 seconds
+
     except Exception as e:
-        print(f"TTS error: {str(e)}")
-        # Create empty file in case of error
+        print(f"❌ TTS error: {str(e)}")
+        # Create empty file on error
         with open(output_path, 'wb') as f:
             f.write(b'')
-        return 0.0
+        return 3.0  # Default 3 seconds on error
 
 
 def generate_audio_for_json(json_file_path: str, progress_callback=None) -> str:
     """
     Generates TTS audio files for all slides in the JSON file.
+
+    IMPROVED: Better validation and error recovery
 
     Args:
         json_file_path: Path to the JSON file
@@ -87,9 +123,16 @@ def generate_audio_for_json(json_file_path: str, progress_callback=None) -> str:
     Returns:
         Path to the updated JSON file
     """
-    # Read JSON file
-    with open(json_file_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+    # Read and validate JSON
+    try:
+        with open(json_file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        raise Exception(f"Invalid JSON file: {str(e)}")
+
+    # Validate required fields
+    if 'slides' not in data:
+        raise Exception("JSON missing 'slides' field")
 
     # Create folder for audio files
     json_dir = os.path.dirname(os.path.abspath(json_file_path))
@@ -101,43 +144,100 @@ def generate_audio_for_json(json_file_path: str, progress_callback=None) -> str:
     slides = data.get('slides', [])
     total_slides = len(slides)
 
+    print(f"\n{'=' * 60}")
+    print(f"🎙️  TTS GENERATION STARTED")
+    print(f"{'=' * 60}")
+    print(f"Target Language: {target_lang}")
+    print(f"Total Slides: {total_slides}")
+    print(f"{'=' * 60}\n")
+
+    success_count = 0
+    error_count = 0
+
     # Create audio file for each slide
     for idx, slide in enumerate(slides, 1):
         slide_number = slide.get('slide_number', idx)
+
+        # CRITICAL: Use translated_text (AI narration in target language)
         translated_text = slide.get('translated_text', '')
 
-        # Remove leading slide number line consisting only of digits
+        # Fallback chain if translated_text is empty
+        if not translated_text:
+            translated_text = slide.get('ai_narration', '')
+        if not translated_text:
+            translated_text = slide.get('text', '')
+        if not translated_text:
+            translated_text = f"Slide {slide_number}"
+
+        # Debug info
+        if idx <= 3:  # Only log first 3 for brevity
+            original_preview = slide.get('original_text', '')[:50]
+            ai_preview = slide.get('ai_narration', '')[:50]
+            translated_preview = translated_text[:50] if translated_text else '(empty)'
+
+            print(f"\n--- Slide {slide_number} ---")
+            print(f"Original: {original_preview}...")
+            print(f"AI narration: {ai_preview}...")
+            print(f"Translated: {translated_preview}...")
+
+        if progress_callback:
+            progress_callback(f'TTS: Processing Slide {idx}/{total_slides}...')
+
+        # Clean up text - remove leading slide numbers
         def strip_leading_slide_number(text: str) -> str:
             lines = text.splitlines()
-            # Ex: Remove lines starting with only number/punct like "2", "12", "3.", "4)"
             while lines and re.match(r'^\s*\d+\s*[\.)]?\s*$', lines[0]):
                 lines.pop(0)
             return "\n".join(lines).lstrip()
 
-        translated_text = strip_leading_slide_number(translated_text)
-
-        if progress_callback:
-            progress_callback(f'TTS: Processing Slide {idx}/{total_slides}...')
+        cleaned_text = strip_leading_slide_number(translated_text)
 
         # Audio filename
         audio_filename = f'slide_{slide_number:03d}.mp3'
         audio_path = os.path.join(audio_dir, audio_filename)
 
         # Create audio file with TTS
-        duration = generate_audio_for_text(translated_text, target_lang, audio_path)
+        try:
+            duration = generate_audio_for_text(cleaned_text, target_lang, audio_path)
 
-        # Update JSON
+            # Verify file was created
+            if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+                print(f"✅ Slide {slide_number}: {audio_filename} ({duration:.2f}s)")
+                success_count += 1
+            else:
+                print(f"⚠️  Slide {slide_number}: Audio file empty, using default duration")
+                duration = 3.0
+                error_count += 1
+        except Exception as e:
+            print(f"❌ Slide {slide_number}: TTS failed - {str(e)}")
+            duration = 3.0
+            error_count += 1
+            # Create empty file to prevent downstream errors
+            with open(audio_path, 'wb') as f:
+                f.write(b'')
+
+        # Update JSON with audio info
         slide['audio_file'] = audio_path
         slide['duration'] = round(duration, 2)
-
-        print(f"✓ Audio file created for Slide {slide_number}: {audio_filename} ({duration:.2f}s)")
 
     # Save updated JSON
     output_json_path = json_file_path.replace('.json', '_with_audio.json')
     with open(output_json_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+    print(f"\n{'=' * 60}")
+    print(f"✅ TTS GENERATION COMPLETE")
+    print(f"{'=' * 60}")
+    print(f"Success: {success_count}/{total_slides} slides")
+    if error_count > 0:
+        print(f"⚠️  Errors: {error_count} slides (using default duration)")
+    print(f"Output: {os.path.basename(output_json_path)}")
+    print(f"{'=' * 60}\n")
+
     if progress_callback:
-        progress_callback(f'TTS completed! Audio files created for {total_slides} slides.')
+        if error_count == 0:
+            progress_callback(f'✅ TTS completed! {success_count}/{total_slides} slides processed')
+        else:
+            progress_callback(f'⚠️  TTS completed with {error_count} errors. {success_count}/{total_slides} succeeded')
 
     return output_json_path

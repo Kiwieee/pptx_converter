@@ -13,7 +13,8 @@ def extract_text_from_pptx(file_path: str) -> List[Dict]:
         List containing a dict for each slide. Each dict:
         {
             'slide_number': int,
-            'text': str (all text combined),
+            'text': str (all text combined - ORIGINAL for AI processing),
+            'original_text': str (copy of text for reference),
             'text_blocks': List[str] (text paragraph by paragraph)
         }
     """
@@ -32,11 +33,15 @@ def extract_text_from_pptx(file_path: str) -> List[Dict]:
                     text_blocks.append(text_content)
                     all_text.append(text_content)
 
+            # Combine all text
+            combined_text = '\n'.join(all_text) if all_text else ''
+
             # If text exists, add to slide data
             if all_text:
                 slides_data.append({
                     'slide_number': slide_num,
-                    'text': '\n'.join(all_text),
+                    'text': combined_text,  # For AI processing
+                    'original_text': combined_text,  # Keep a copy
                     'text_blocks': text_blocks
                 })
             else:
@@ -44,6 +49,7 @@ def extract_text_from_pptx(file_path: str) -> List[Dict]:
                 slides_data.append({
                     'slide_number': slide_num,
                     'text': '',
+                    'original_text': '',
                     'text_blocks': []
                 })
 

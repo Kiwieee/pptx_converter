@@ -7,7 +7,6 @@ DEEPL_AVAILABLE = False
 DEEP_TRANSLATOR_AVAILABLE = False
 GOOGLETRANS_AVAILABLE = False
 
-# Try DeepL first (premium quality)
 try:
     import deepl
 
@@ -16,7 +15,6 @@ try:
 except ImportError:
     print("✗ DeepL not installed (pip install deepl)")
 
-# Try deep-translator (Google Translate wrapper)
 try:
     from deep_translator import GoogleTranslator
 
@@ -25,7 +23,6 @@ try:
 except ImportError:
     print("✗ deep-translator not installed (pip install deep-translator)")
 
-# Try googletrans as last resort
 try:
     from googletrans import Translator
 
@@ -36,75 +33,41 @@ except ImportError:
 
 
 def get_deepl_api_key():
-    """
-    Get DeepL API key from environment variable or config file.
-    You can set it in multiple ways:
-
-    1. Environment variable:
-       SET DEEPL_API_KEY=your-key-here  (Windows)
-       export DEEPL_API_KEY=your-key-here  (Linux/Mac)
-
-    2. Create a file named 'deepl_config.txt' in the same directory with just your API key
-
-    3. Hardcode it here (not recommended for security):
-       return "your-key-here"
-    """
-    # Method 1: Environment variable
+    """Get DeepL API key from environment variable or config file."""
     api_key = os.environ.get('DEEPL_API_KEY')
     if api_key:
         return api_key
 
-    # Method 2: Config file
     config_file = os.path.join(os.path.dirname(__file__), 'deepl_config.txt')
     if os.path.exists(config_file):
         with open(config_file, 'r') as f:
             api_key = f.read().strip()
             if api_key:
                 return api_key
-
-    # Method 3: Hardcoded (uncomment and add your key)
-    # return "your-api-key-here"
-
     return None
 
 
 def translate_texts(slides_data: List[Dict], target_lang: str, progress_callback=None) -> List[Dict]:
     """
-    Translates slide texts to the target language using available translation service.
-    Priority: DeepL > deep-translator > googletrans
+    Translates slide texts (including AI narrations) to the target language.
 
-    Args:
-        slides_data: List returned from extract_text_from_pptx()
-        target_lang: Target language code (e.g., 'en', 'tr', 'de')
-        progress_callback: Optional callback function for progress updates
-
-    Returns:
-        List in the same format containing translated texts. 'translated_text' is added to each dict.
+    NOW PROPERLY HANDLES:
+    - ai_narration field (primary text to translate)
+    - Falls back to 'text' field if ai_narration is missing
     """
-
-    # Select translation engine
     translator = None
     engine_name = None
 
+    # Initialize translator
     if DEEPL_AVAILABLE:
         api_key = get_deepl_api_key()
         if api_key:
             try:
-                # DeepL uses different language codes for some languages
-                # Map common codes to DeepL format
                 deepl_lang_map = {
-                    'en': 'EN-US',  # or 'EN-GB'
-                    'tr': 'TR',
-                    'de': 'DE',
-                    'fr': 'FR',
-                    'es': 'ES',
-                    'it': 'IT',
-                    'ru': 'RU',
-                    'ja': 'JA',
-                    'ko': 'KO',
-                    'zh': 'ZH'  # Chinese
+                    'en': 'EN-US', 'tr': 'TR', 'de': 'DE', 'fr': 'FR',
+                    'es': 'ES', 'it': 'IT', 'ru': 'RU', 'ja': 'JA',
+                    'ko': 'KO', 'zh': 'ZH'
                 }
-
                 deepl_target = deepl_lang_map.get(target_lang.lower(), target_lang.upper())
                 translator = deepl.Translator(api_key)
 
@@ -159,8 +122,14 @@ def translate_texts(slides_data: List[Dict], target_lang: str, progress_callback
 
     for slide in slides_data:
         try:
-            if slide['text'].strip():
-                # Translate text (with retry mechanism)
+            # CRITICAL FIX: Use ai_narration if available, otherwise fall back to text
+            text_to_translate = slide.get('ai_narration', '') or slide.get('text', '')
+
+            # Store original text separately
+            original_text = slide.get('text', '')
+
+            if text_to_translate.strip():
+                # Translate main text with retry
                 max_retries = 3
                 translated_text = None
 
@@ -174,17 +143,17 @@ def translate_texts(slides_data: List[Dict], target_lang: str, progress_callback
                         if progress_callback:
                             progress_callback(status_msg)
 
-                        translated_text = translate_func(slide['text'])
+                        translated_text = translate_func(text_to_translate)
 
                         success_msg = f'✓ Slide {slide["slide_number"]}/{total_slides} completed'
                         print(success_msg)
                         if progress_callback:
                             progress_callback(success_msg)
-                        break  # Exit loop if successful
+                        break
 
                     except Exception as retry_error:
                         if attempt < max_retries - 1:
-                            wait_time = (attempt + 1) * 2  # Wait 2, 4, 6 seconds
+                            wait_time = (attempt + 1) * 2
                             error_msg = f"✗ Slide {slide['slide_number']} attempt {attempt + 1} failed. Retrying in {wait_time}s..."
                             print(f"{error_msg} Error: {str(retry_error)}")
                             if progress_callback:
@@ -197,7 +166,7 @@ def translate_texts(slides_data: List[Dict], target_lang: str, progress_callback
                 if translated_text is None or not translated_text.strip():
                     raise Exception("Translation result returned empty or None")
 
-                # Translate individual blocks (preserves formatting)
+                # Translate individual blocks if they exist
                 translated_blocks = []
                 if slide.get('text_blocks'):
                     for block_idx, block in enumerate(slide['text_blocks']):
@@ -218,23 +187,25 @@ def translate_texts(slides_data: List[Dict], target_lang: str, progress_callback
                             translated_blocks.append('')
 
                 translated_slide = slide.copy()
-                translated_slide['translated_text'] = translated_text
+                translated_slide['original_text'] = original_text  # Keep original extracted text
+                translated_slide['translated_text'] = translated_text  # Translated AI narration
                 translated_slide['translated_blocks'] = translated_blocks
                 translated_slides.append(translated_slide)
 
                 print(f"Slide {slide['slide_number']} translated: {translated_text[:50]}...")
 
-                # Rate limiting (DeepL is more generous, but still be polite)
+                # Rate limiting
                 if engine_name == "DeepL (Premium)":
-                    time.sleep(0.1)  # DeepL can handle higher rates
+                    time.sleep(0.1)
                 else:
-                    time.sleep(0.5)  # Be more conservative with free services
+                    time.sleep(0.5)
 
                 if progress_callback:
                     progress_callback(f'Slide {slide["slide_number"]}/{total_slides} processed')
             else:
                 # Empty slide
                 translated_slide = slide.copy()
+                translated_slide['original_text'] = original_text
                 translated_slide['translated_text'] = ''
                 translated_slide['translated_blocks'] = []
                 translated_slides.append(translated_slide)
@@ -248,14 +219,13 @@ def translate_texts(slides_data: List[Dict], target_lang: str, progress_callback
             if progress_callback:
                 progress_callback(f"✗ Error on slide {slide['slide_number']}: {str(e)}")
 
-            # Save with empty translation on error
             translated_slide = slide.copy()
+            translated_slide['original_text'] = slide.get('text', '')
             translated_slide['translated_text'] = ''
             translated_slide['translated_blocks'] = []
             translated_slide['translation_error'] = str(e)
             translated_slides.append(translated_slide)
 
-    # Final summary
     success_count = sum(1 for s in translated_slides if s.get('translated_text'))
     summary = f"Translation complete: {success_count}/{total_slides} slides translated using {engine_name}"
     print(summary)
@@ -266,16 +236,7 @@ def translate_texts(slides_data: List[Dict], target_lang: str, progress_callback
 
 
 def translate_single_text(text: str, target_lang: str) -> str:
-    """
-    Translates a single piece of text.
-
-    Args:
-        text: Text to translate
-        target_lang: Target language code
-
-    Returns:
-        Translated text
-    """
+    """Translates a single piece of text."""
     try:
         if DEEPL_AVAILABLE:
             api_key = get_deepl_api_key()
@@ -299,7 +260,6 @@ def translate_single_text(text: str, target_lang: str) -> str:
         return text
 
 
-# Test function to check which services are available
 def check_translation_services():
     """Check which translation services are available and working"""
     print("\n=== Translation Services Status ===")
@@ -324,5 +284,4 @@ def check_translation_services():
     print("=" * 40 + "\n")
 
 
-# Run check on import
 check_translation_services()
