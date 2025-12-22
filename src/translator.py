@@ -79,6 +79,7 @@ def translate_texts(slides_data: List[Dict], target_lang: str, progress_callback
     if translator is None and DEEP_TRANSLATOR_AVAILABLE:
         try:
             translator_obj = GoogleTranslator(source='auto', target=target_lang)
+            translator = translator_obj  # FIX: Set translator so next check passes
             translate_func = lambda text: translator_obj.translate(text)
             engine_name = "Google Translate (Free)"
             print(f"✓ Using deep-translator (Google Translate)")
@@ -91,6 +92,7 @@ def translate_texts(slides_data: List[Dict], target_lang: str, progress_callback
     if translator is None and GOOGLETRANS_AVAILABLE:
         try:
             translator_obj = Translator()
+            translator = translator_obj  # FIX: Set translator so next check passes
             translate_func = lambda text: translator_obj.translate(text, dest=target_lang).text
             engine_name = "googletrans (Fallback)"
             print(f"✓ Using googletrans (fallback)")

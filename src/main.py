@@ -30,6 +30,7 @@ try:
     from tts_generator import generate_audio_for_json
     from video_generator import create_video_from_json
     from ai_narrator import AITeacherNarrator, get_available_styles
+    from enrichment_config import ENRICHMENT_LEVELS, get_enrichment_level_config
 
     # Try to import Cloud TTS
     try:
@@ -178,10 +179,12 @@ def main(page: ft.Page):
         result_container.update()
         lang_dropdown.value = "English"
         style_dropdown.value = "engaging"
+        enrichment_dropdown.value = "none"  # Reset enrichment level
         voice_quality_dropdown.value = "cloud" if CLOUD_TTS_AVAILABLE else "gtts"
         voice_gender_dropdown.value = "MALE"
         lang_dropdown.update()
         style_dropdown.update()
+        enrichment_dropdown.update()  # Update enrichment dropdown
         voice_quality_dropdown.update()
         voice_gender_dropdown.update()
         page.update()
@@ -276,7 +279,13 @@ def main(page: ft.Page):
             try:
                 # Get temperature from style config
                 style_temp = narration_styles[narration_style]['temperature']
-                narrator = AITeacherNarrator(temperature=style_temp, style=narration_style)
+                enrichment_level = enrichment_dropdown.value  # Get selected enrichment level
+                add_log(f"Enrichment level: {enrichment_level}", COLOR_ACCENT)
+                narrator = AITeacherNarrator(
+                    temperature=style_temp, 
+                    style=narration_style,
+                    enrichment_level=enrichment_level
+                )
                 slides_data = narrator.narrate_slides(
                     slides_data,
                     progress_callback=lambda msg: add_log(msg, COLOR_ACCENT)
@@ -473,6 +482,30 @@ def main(page: ft.Page):
         text_size=14
     )
 
+    # Content Enrichment Level Dropdown (NEW)
+    enrichment_options = []
+    for key, config in ENRICHMENT_LEVELS.items():
+        enrichment_options.append(
+            ft.dropdown.Option(
+                key=key,
+                text=f"{config['name']} - {config['description']}"
+            )
+        )
+
+    enrichment_dropdown = ft.Dropdown(
+        label="Content Enrichment Level",
+        hint_text="Add extra information to narrations",
+        options=enrichment_options,
+        value="none",  # User chooses enrichment level
+        width=550,
+        bgcolor="#0F172A",
+        border_color="#334155",
+        color=COLOR_TEXT_MAIN,
+        focused_border_color=COLOR_PRIMARY,
+        content_padding=18,
+        text_size=14
+    )
+
     # Voice Quality Dropdown (NEW)
     voice_quality_dropdown = ft.Dropdown(
         label="Voice Quality",
@@ -585,9 +618,11 @@ def main(page: ft.Page):
             ft.Divider(height=20, color="transparent"),
             style_dropdown,  # Narration style
             ft.Divider(height=10, color="transparent"),
-            voice_quality_dropdown,  # NEW: TTS engine selection
+            enrichment_dropdown,  # NEW: Content enrichment level
             ft.Divider(height=10, color="transparent"),
-            voice_gender_dropdown,  # NEW: Voice gender
+            voice_quality_dropdown,  # TTS engine selection
+            ft.Divider(height=10, color="transparent"),
+            voice_gender_dropdown,  # Voice gender
             ft.Divider(height=10, color="transparent"),
             lang_dropdown,  # Target language
             ft.Divider(height=10, color="transparent"),

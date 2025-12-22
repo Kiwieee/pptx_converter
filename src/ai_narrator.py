@@ -85,11 +85,21 @@ NARRATION_STYLES = {
 
 class AITeacherNarrator:
     """
-    Enhanced AI Narrator with context awareness.
+    Enhanced AI Narrator with context awareness and content enrichment.
     Remembers previous slides to create coherent, flowing narration.
+    Now supports content enrichment with configurable levels.
     """
 
-    def __init__(self, temperature: float = 0.7, style: str = "engaging"):
+    def __init__(self, temperature: float = 0.7, style: str = "engaging", 
+                 enrichment_level: str = "none"):
+        """
+        Initialize the AI Narrator.
+        
+        Args:
+            temperature: AI creativity level (0.0-1.0)
+            style: Narration style (professional, engaging, etc.)
+            enrichment_level: Content enrichment level (none, minimal, normal, detailed, academic)
+        """
         if not SDK_VERSION:
             raise ImportError("Google Gemini SDK not installed.")
 
@@ -99,7 +109,22 @@ class AITeacherNarrator:
 
         self.temperature = temperature
         self.style = style
+        self.enrichment_level = enrichment_level
         self.conversation_history = []
+        self.content_enricher = None
+
+        # Initialize Content Enricher if level is not "none"
+        if enrichment_level and enrichment_level.lower() != "none":
+            try:
+                from content_enricher import ContentEnricher
+                self.content_enricher = ContentEnricher(enrichment_level=enrichment_level)
+                logger.info(f"🔬 Content Enricher initialized: {enrichment_level}")
+            except ImportError as e:
+                logger.warning(f"⚠ Content Enricher not available: {e}")
+                self.content_enricher = None
+            except Exception as e:
+                logger.warning(f"⚠ Content Enricher initialization failed: {e}")
+                self.content_enricher = None
 
         # Initialize SDK
         try:
@@ -189,11 +214,18 @@ class AITeacherNarrator:
         """
         Generate context-aware narration for all slides.
         Each narration considers previous slides for smooth flow.
+        Now with optional content enrichment.
         """
         total = len(slides_data)
         self.conversation_history = []  # Reset for new presentation
 
         logger.info(f"🎭 Using narration style: {self._get_style_config(self.style)['name']}")
+        
+        # Log enrichment status
+        if self.content_enricher:
+            logger.info(f"🔬 Content enrichment enabled: {self.enrichment_level}")
+        else:
+            logger.info("📝 Content enrichment: disabled (using standard narration)")
 
         for i, slide in enumerate(slides_data, 1):
             text = slide.get("text", "").strip()
@@ -202,11 +234,30 @@ class AITeacherNarrator:
                 slide["ai_narration"] = text
                 continue
 
+            # Step 1: Apply content enrichment FIRST (if enabled)
+            enriched_text = text
+            if self.content_enricher and self.enrichment_level != "none":
+                if progress_callback:
+                    progress_callback(f"🔬 Enriching slide {i}/{total}...")
+                try:
+                    enriched_text = self.content_enricher.enrich_slide(
+                        slide_text=text,
+                        slide_number=i,
+                        progress_callback=progress_callback
+                    )
+                    slide["enriched_text"] = enriched_text
+                    slide["enrichment_level"] = self.enrichment_level
+                    logger.info(f"✓ Slide {i} enriched successfully")
+                except Exception as e:
+                    logger.warning(f"⚠ Enrichment failed for slide {i}: {e}")
+                    enriched_text = text  # Fallback to original
+
+            # Step 2: Generate narration (using enriched or original text)
             if progress_callback:
                 progress_callback(f"🤖 Generating narration {i}/{total} (with context)")
 
             is_title = (i == 1) or (len(text.split()) < 15)
-            prompt = self._build_context_aware_prompt(text, i, total, is_title)
+            prompt = self._build_context_aware_prompt(enriched_text, i, total, is_title)
 
             # Retry mechanism
             for attempt in (1, 2):
@@ -232,6 +283,7 @@ class AITeacherNarrator:
                         self.conversation_history.append({
                             'slide_number': i,
                             'text': text,
+                            'enriched_text': enriched_text if enriched_text != text else None,
                             'narration': narration
                         })
 
@@ -240,28 +292,34 @@ class AITeacherNarrator:
                     else:
                         logger.warning(f"⚠ Slide {i} attempt {attempt}: Empty response")
                         if attempt == 2:
-                            slide["ai_narration"] = text
+                            slide["ai_narration"] = enriched_text
 
                 except Exception as e:
                     error_msg = str(e)
 
                     if "403" in error_msg or "PERMISSION_DENIED" in error_msg:
                         logger.error(f"✗ API Key Error: {error_msg}")
-                        slide["ai_narration"] = text
+                        slide["ai_narration"] = enriched_text
                         break
                     elif "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
                         logger.warning(f"⚠ Rate limit hit on slide {i}, waiting...")
                         time.sleep(5)
                         if attempt == 2:
-                            slide["ai_narration"] = text
+                            slide["ai_narration"] = enriched_text
                     else:
                         logger.warning(f"⚠ Slide {i} attempt {attempt} failed: {e}")
                         if attempt == 2:
-                            slide["ai_narration"] = text
+                            slide["ai_narration"] = enriched_text
 
                 time.sleep(0.8)  # Slightly longer delay for context-aware generation
 
         logger.info(f"✓ Context-aware narration complete for {total} slides")
+        
+        # Log enrichment summary
+        if self.content_enricher:
+            enriched_count = sum(1 for s in slides_data if s.get("enriched_text"))
+            logger.info(f"🔬 Enrichment summary: {enriched_count}/{total} slides enriched")
+        
         return slides_data
 
 
