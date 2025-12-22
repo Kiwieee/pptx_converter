@@ -5,6 +5,13 @@ from datetime import datetime
 import threading
 import platform
 
+# --- NEW: Import dotenv to load environment variables globally ---
+from dotenv import load_dotenv
+
+# Load the .env file immediately so all modules (Cloud TTS, Gemini, etc.) can see the keys
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+# ---------------------------------------------------------------
+
 import flet as ft
 
 if platform.system() != 'Windows':
