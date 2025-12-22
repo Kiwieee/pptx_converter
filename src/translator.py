@@ -1,6 +1,10 @@
 from typing import List, Dict
 import time
 import os
+from dotenv import load_dotenv # NEW: Import dotenv
+
+# NEW: Load .env from the same directory as this script
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
 # Priority order: DeepL (best quality) -> deep-translator (free) -> googletrans (fallback)
 DEEPL_AVAILABLE = False
@@ -9,7 +13,6 @@ GOOGLETRANS_AVAILABLE = False
 
 try:
     import deepl
-
     DEEPL_AVAILABLE = True
     print("✓ DeepL translator loaded (premium quality)")
 except ImportError:
@@ -17,7 +20,6 @@ except ImportError:
 
 try:
     from deep_translator import GoogleTranslator
-
     DEEP_TRANSLATOR_AVAILABLE = True
     print("✓ deep-translator loaded (Google Translate)")
 except ImportError:
@@ -25,7 +27,6 @@ except ImportError:
 
 try:
     from googletrans import Translator
-
     GOOGLETRANS_AVAILABLE = True
     print("✓ googletrans loaded (fallback)")
 except ImportError:
@@ -33,18 +34,10 @@ except ImportError:
 
 
 def get_deepl_api_key():
-    """Get DeepL API key from environment variable or config file."""
-    api_key = os.environ.get('DEEPL_API_KEY')
-    if api_key:
-        return api_key
-
-    config_file = os.path.join(os.path.dirname(__file__), 'deepl_config.txt')
-    if os.path.exists(config_file):
-        with open(config_file, 'r') as f:
-            api_key = f.read().strip()
-            if api_key:
-                return api_key
-    return None
+    """Get DeepL API key from environment variables (loaded from .env)."""
+    # Simply return the key from the environment
+    # load_dotenv() above has already populated os.environ with your .env content
+    return os.environ.get('DEEPL_API_KEY')
 
 
 def translate_texts(slides_data: List[Dict], target_lang: str, progress_callback=None) -> List[Dict]:
@@ -264,6 +257,7 @@ def check_translation_services():
     """Check which translation services are available and working"""
     print("\n=== Translation Services Status ===")
 
+    # get_deepl_api_key will now check os.environ (loaded from .env)
     services = {
         "DeepL (Premium)": DEEPL_AVAILABLE and get_deepl_api_key() is not None,
         "deep-translator (Google Free)": DEEP_TRANSLATOR_AVAILABLE,
@@ -276,10 +270,7 @@ def check_translation_services():
 
     if DEEPL_AVAILABLE and not get_deepl_api_key():
         print("\n⚠ DeepL is installed but no API key found!")
-        print("Set your API key using one of these methods:")
-        print("  1. Environment: SET DEEPL_API_KEY=your-key")
-        print("  2. File: Create 'deepl_config.txt' with your key")
-        print("  3. Edit get_deepl_api_key() function")
+        print("Check that DEEPL_API_KEY is present in your .env file.")
 
     print("=" * 40 + "\n")
 

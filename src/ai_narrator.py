@@ -7,12 +7,16 @@ import os
 import logging
 import time
 from typing import Optional, List, Dict
+from dotenv import load_dotenv  # NEW: Import dotenv
+
+# NEW: Load .env from the same directory (or src/)
+# This looks for .env in the current folder. Adjust path if it's strictly in 'src/'
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger(__name__)
 
 HARDCODED_KEY = None
-
 SDK_VERSION = None
 
 try:
@@ -31,28 +35,20 @@ except ImportError:
 
 
 def get_gemini_api_key() -> Optional[str]:
-    """Get Gemini API key from environment or config file."""
+    """Get Gemini API key from environment variables (loaded from .env)."""
+    # Simply return the key from the environment
+    # load_dotenv() above has already populated os.environ
     api_key = os.environ.get("GOOGLE_API_KEY")
-    if api_key and api_key.strip():
-        logger.info("✓ API key loaded from environment variable")
+
+    if api_key:
+        logger.info("✓ API key loaded successfully")
         return api_key.strip()
 
-    config_file = os.path.join(os.path.dirname(__file__), 'ai_config.txt')
-    if os.path.exists(config_file):
-        try:
-            with open(config_file, 'r', encoding='utf-8') as f:
-                api_key = f.read().strip()
-                if api_key and "PASTE_YOUR" not in api_key and len(api_key) > 20:
-                    logger.info(f"✓ API key loaded from config file")
-                    return api_key
-        except Exception as e:
-            logger.error(f"✗ Error reading config file: {e}")
-
-    logger.error("✗ No API key found!")
+    logger.error("✗ No API key found! Check your .env file.")
     return None
 
 
-# Narration style presets with detailed descriptions
+# Narration style presets
 NARRATION_STYLES = {
     "professional": {
         "name": "Professional Lecturer",
@@ -103,7 +99,7 @@ class AITeacherNarrator:
 
         self.temperature = temperature
         self.style = style
-        self.conversation_history = []  # NEW: Store context
+        self.conversation_history = []
 
         # Initialize SDK
         try:
@@ -272,9 +268,6 @@ class AITeacherNarrator:
 def get_available_styles() -> Dict[str, dict]:
     """
     Get all available narration styles for UI display.
-
-    Returns:
-        Dict with style keys and their configurations
     """
     return NARRATION_STYLES
 
