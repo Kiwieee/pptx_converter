@@ -1,6 +1,6 @@
 # Presentation to Lecture Video Generator
 
-This application is an AI-powered tool designed to convert PowerPoint presentations into narrated video lectures with multi-language support. The system leverages Google Gemini AI to generate context-aware explanations and supports both premium (Google Cloud TTS) and free (gTTS) text-to-speech engines.
+This application is an AI-powered tool designed to convert PowerPoint presentations into narrated video lectures with multi-language support. The system leverages Google Gemini AI to generate context-aware explanations and supports both premium (Google Cloud TTS) and free (gTTS) text-to-speech engines. 
 
 ## Key Features
 
